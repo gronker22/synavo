@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Synavo Missed Payment Risk</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/model.css') }}">
+</head>
+<body>
+<header class="top">
+    <div class="wrap">
+        <a class="logo" href="/">Synavo</a>
+        <nav><a href="/">App</a><a href="#predict">Predict</a><a href="#about">How it works</a><a href="#api">API</a></nav>
+    </div>
+</header>
+
+<main class="wrap">
+    <section class="hero">
+        <h1>Will this user miss a payment next month?</h1>
+        <p>
+            Synavo sits on top of a user's existing bank accounts. It watches bills and subscriptions,
+            and if a payment is about to fail, it reroutes it through an account that has the money.
+            This model estimates the <strong>probability that a user misses a bill or subscription payment
+            next month</strong>, so Synavo can step in <em>before</em> the payment fails.
+        </p>
+    </section>
+
+    <div class="grid">
+        <section class="card" id="predict">
+            <h2>Enter user details</h2>
+            <form method="get" action="/model#predict" novalidate>
+                <label for="months_as_user">Months as Synavo user</label>
+                <input type="number" id="months_as_user" name="months_as_user"
+                       min="1" max="60" step="1" placeholder="e.g. 6"
+                       value="{{ form.get('months_as_user', '') }}" required>
+                <small>Whole number, 1 to 60</small>
+                {% if errors.months_as_user %}<p class="err">Months as user {{ errors.months_as_user }}.</p>{% endif %}
+
+                <label for="avg_monthly_balance">Average monthly balance (EUR)</label>
+                <input type="number" id="avg_monthly_balance" name="avg_monthly_balance"
+                       min="0" max="5000" step="0.01" placeholder="e.g. 450"
+                       value="{{ form.get('avg_monthly_balance', '') }}" required>
+                <small>Across all linked accounts, 0 to 5,000</small>
+                {% if errors.avg_monthly_balance %}<p class="err">Average monthly balance {{ errors.avg_monthly_balance }}.</p>{% endif %}
+
+                <label for="active_subscriptions">Active subscriptions</label>
+                <input type="number" id="active_subscriptions" name="active_subscriptions"
+                       min="0" max="15" step="1" placeholder="e.g. 9"
+                       value="{{ form.get('active_subscriptions', '') }}" required>
+                <small>Streaming, gym, apps, phone plans... 0 to 15</small>
+                {% if errors.active_subscriptions %}<p class="err">Active subscriptions {{ errors.active_subscriptions }}.</p>{% endif %}
+
+                <button type="submit">Predict risk</button>
+            </form>
+        </section>
+
+        <section class="card result {% if result %}risk-{{ result.risk_level }}{% else %}empty{% endif %}" aria-live="polite">
+            <h2>Prediction</h2>
+            {% if result %}
+                {% set pct = (result.probability_missed_payment * 100) | round(1) %}
+                <p class="verdict">
+                    {% if result.prediction == 1 %}Likely to <strong>miss</strong> a payment{% else %}Likely to <strong>pay on time</strong>{% endif %}
+                </p>
+                <div class="prob">
+                    <span class="prob-num">{{ pct }}%</span>
+                    <span class="prob-lbl">probability of a missed payment</span>
+                </div>
+                <div class="bar" role="img" aria-label="{{ pct }} percent risk">
+                    <div class="fill" style="width: {{ pct }}%"></div>
+                </div>
+                <dl>
+                    <dt>Risk level</dt><dd><span class="pill">{{ result.risk_level | upper }}</span></dd>
+                    <dt>Probability paid on time</dt><dd>{{ (result.probability_paid_on_time * 100) | round(1) }}%</dd>
+                    <dt>What Synavo does</dt><dd>{{ result.recommended_action }}</dd>
+                </dl>
+            {% else %}
+                <p class="muted">Fill in the form and press <strong>Predict risk</strong> to get a live prediction from the trained model.</p>
+                <p class="muted">Try a new user with a low balance and many subscriptions (6, 300, 12), then a long-time user with a healthy balance (48, 4000, 2).</p>
+            {% endif %}
+        </section>
+    </div>
+
+    <section class="card" id="about">
+        <h2>How it works</h2>
+        <p>
+            A logistic regression model trained on 5,000 synthetic Synavo users (seed 42, 70/30 stratified split).
+            Test accuracy is about 0.73, with train and test scores close together, so the model is not overfitting.
+        </p>
+        <div class="table-scroll"><table>
+            <thead><tr><th>Variable</th><th>Type</th><th>Effect on risk</th></tr></thead>
+            <tbody>
+                <tr><td><code>months_as_user</code></td><td>Discrete, 1 to 60</td><td>Longer tenure lowers risk</td></tr>
+                <tr><td><code>avg_monthly_balance</code></td><td>Continuous, EUR 0 to 5,000</td><td>Higher balance lowers risk</td></tr>
+                <tr><td><code>active_subscriptions</code></td><td>Discrete, 0 to 15</td><td>More subscriptions raise risk</td></tr>
+                <tr><td><code>missed_payment</code> (target)</td><td>Binary</td><td>1 = misses a payment, 0 = pays on time</td></tr>
+            </tbody>
+        </table></div>
+        <p class="muted">Risk levels: below 35% is low, 35% to 60% is medium, 60% and above is high.</p>
+    </section>
+
+    <section class="card" id="api">
+        <h2>API endpoint</h2>
+        <p>Other apps can get the same prediction as JSON from <code>/api/predict</code>.</p>
+        <h3>GET with query parameters</h3>
+        <pre><code><a href="/api/predict?months_as_user=6&amp;avg_monthly_balance=450&amp;active_subscriptions=9">{{ request.host_url }}api/predict?months_as_user=6&amp;avg_monthly_balance=450&amp;active_subscriptions=9</a></code></pre>
+        <h3>POST with a JSON body</h3>
+        <pre><code>curl -X POST {{ request.host_url }}api/predict \
+  -H "Content-Type: application/json" \
+  -d '{"months_as_user": 6, "avg_monthly_balance": 450, "active_subscriptions": 9}'</code></pre>
+        <p class="muted">Full documentation is in the GitHub README. A summary is at <a href="/api">/api</a>.</p>
+    </section>
+</main>
+
+<footer class="wrap muted">Synavo MVF · IE University · Fintech: Technology Transforming Financial Services · Synthetic data, for demonstration only.</footer>
+</body>
+</html>
